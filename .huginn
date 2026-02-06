@@ -1,0 +1,20 @@
+[annotation]
+# enabled = true
+# background = "#ffffff"
+# foreground = "#000000"
+
+[plugin]
+issue_dir = .issues
+
+[index]
+# key_length = 16
+
+[issue]
+# open_after_create = false
+
+[show]
+# description_length = 80
+
+[logging]
+# enabled = false
+# filepath = .huginnlog

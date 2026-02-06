@@ -1,0 +1,208 @@
+*huginn.txt*    Filesystem-based issue tracking inside Neovim
+
+Author:  JDS Consulting, PLLC
+License: MIT
+
+==============================================================================
+INTRODUCTION                                                  *huginn*
+
+Huginn is a Neovim plugin for managing code issues and annotations directly
+within the editor. Issues are stored as Markdown files in a time-indexed
+directory structure on the filesystem, with no external dependencies (no
+GitHub Issues, Jira, etc.). Issues are linked to source code locations via
+tree-sitter queries, and virtual text annotations mark lines with open
+issues.
+
+==============================================================================
+REQUIREMENTS                                          *huginn-requirements*
+
+- Neovim >= 0.9
+- Tree-sitter parsers installed for target languages
+
+==============================================================================
+SETUP                                                    *huginn-setup*
+
+Add Huginn to your plugin manager and call the setup function: >lua
+
+    require("huginn").setup()
+<
+To customize default keymaps, pass an `opts.keymaps` table. Keys match the
+keymap names listed in |huginn-keymaps|. Set a key to `false` to disable
+that binding: >lua
+
+    require("huginn").setup({
+        keymaps = {
+            create = "<leader>ic",    -- override the create binding
+            home = false,             -- disable the home binding
+        },
+    })
+<
+Huginn activates only when a `.huginn` configuration file is found in the
+current directory or a parent directory. Without one the plugin remains
+dormant and only registers commands. Run |:HuginnInit| to create one.
+
+==============================================================================
+COMMANDS                                              *huginn-commands*
+
+                                                          *:HuginnInit*
+:HuginnInit         Initialize a `.huginn` configuration file in the current
+                    working directory. All options are written as comments so
+                    the plugin starts with defaults.
+
+                                                        *:HuginnConfig*
+:HuginnConfig       Open the `.huginn` configuration file in a buffer for
+                    editing. Changes are picked up on save.
+
+                                                           *:HuginnLog*
+:HuginnLog          Show the Huginn log buffer in a floating window.
+
+                                                        *:HuginnCreate*
+:HuginnCreate       Create a new issue at the current cursor position.
+                    Supports visual mode: select a range first and the issue
+                    will reference the enclosing tree-sitter scope.
+
+                                                          *:HuginnShow*
+:HuginnShow         Show issues for the current buffer in a picker window.
+
+                                                          *:HuginnHome*
+:HuginnHome         Show all project files that have associated issues.
+
+                                                           *:HuginnAdd*
+:HuginnAdd          Add a tree-sitter scope reference to an existing issue.
+
+                                                        *:HuginnRemove*
+:HuginnRemove       Remove a tree-sitter scope reference from an existing
+                    issue.
+
+                                                          *:HuginnNext*
+:HuginnNext         Jump to the next issue location in the current buffer.
+
+                                                      *:HuginnPrevious*
+:HuginnPrevious     Jump to the previous issue location in the current buffer.
+
+                                                        *:HuginnDoctor*
+:HuginnDoctor       Scan all indexed issues for integrity problems and
+                    interactively repair them. The doctor classifies issues
+                    into four categories:
+
+                    - OK: issue file exists and all references resolve.
+                    - Missing file: the source file no longer exists.
+                      Prompts to relocate to another project file.
+                    - Broken refs: tree-sitter references cannot be found.
+                      Prompts to pick replacement scope references.
+                    - Missing index: issue exists but its index entry is
+                      absent. Auto-repaired without prompting.
+
+==============================================================================
+DEFAULT KEYMAPS                                        *huginn-keymaps*
+
+All keymaps are set in normal mode unless noted otherwise. Each can be
+overridden or disabled via |huginn-setup|.
+
+    Keymap          Mode    Command         Description ~
+    `<leader>hc`    n, v    :HuginnCreate   Create issue
+    `<leader>hs`    n       :HuginnShow     Show buffer issues
+    `<leader>hn`    n       :HuginnNext     Next issue location
+    `<leader>hp`    n       :HuginnPrevious Previous issue location
+    `<leader>ha`    n       :HuginnAdd      Add scope reference
+    `<leader>hr`    n       :HuginnRemove   Remove scope reference
+    `<leader>hh`    n       :HuginnHome     Show project issue files
+
+==============================================================================
+CONFIGURATION                                    *huginn-configuration*
+
+Project configuration lives in a `.huginn` file (INI format) at the project
+root. Create one with |:HuginnInit|. All values below show defaults.
+
+Uncomment a line in the generated file to override the default.
+
+------------------------------------------------------------------------------
+[annotation]                                  *huginn-config-annotation*
+
+    enabled = true ~
+        (boolean) Enable or disable virtual text annotations on buffers.
+
+    background = "#ffffff" ~
+        (string) Background colour for the |HuginnAnnotation| highlight
+        group. Any valid hex colour.
+
+    foreground = "#000000" ~
+        (string) Foreground colour for the |HuginnAnnotation| highlight
+        group. Any valid hex colour.
+
+------------------------------------------------------------------------------
+[plugin]                                          *huginn-config-plugin*
+
+    issue_dir = issues ~
+        (string) Directory name (relative to the `.huginn` file) where
+        issue Markdown files are stored.
+
+------------------------------------------------------------------------------
+[index]                                            *huginn-config-index*
+
+    key_length = 16 ~
+        (integer) Number of hex characters used when truncating the
+        SHA256 hash of a file path for index lookups. Longer values
+        reduce collision probability.
+
+------------------------------------------------------------------------------
+[issue]                                            *huginn-config-issue*
+
+    open_after_create = false ~
+        (boolean) When true, immediately open the issue Markdown file in
+        a buffer after creating a new issue with |:HuginnCreate|.
+
+------------------------------------------------------------------------------
+[show]                                              *huginn-config-show*
+
+    description_length = 80 ~
+        (integer) Maximum number of characters shown for issue
+        descriptions in the |:HuginnShow| picker.
+
+------------------------------------------------------------------------------
+[logging]                                        *huginn-config-logging*
+
+    enabled = false ~
+        (boolean) Enable or disable writing log entries to a file.
+
+    filepath = .huginnlog ~
+        (string) Path to the log file, relative to the project root.
+
+==============================================================================
+HIGHLIGHTS                                        *huginn-highlights*
+
+                                                    *HuginnAnnotation*
+HuginnAnnotation
+    Highlight group used for virtual text annotations. Colours are set from
+    the `[annotation]` section of the `.huginn` config (see
+    |huginn-config-annotation|).
+
+    To override manually after setup: >vim
+        highlight HuginnAnnotation guibg=#1e1e2e guifg=#cdd6f4
+<
+    The highlight is refreshed automatically when the config file is saved.
+
+==============================================================================
+HEALTHCHECK                                      *huginn-healthcheck*
+
+Run the built-in health check with: >vim
+
+    :checkhealth huginn
+<
+The check verifies:
+
+- Neovim >= 0.9 and tree-sitter API availability
+- Tree-sitter parser installed for the current buffer's filetype
+- `.huginn` file found in the directory tree and loads without errors
+- Cache integrity: every indexed issue ID maps to an existing Issue.md
+  (stale entries are evicted automatically)
+- Issue integrity: source files exist and tree-sitter references resolve
+  (reports problems fixable with |:HuginnDoctor|)
+
+==============================================================================
+ABOUT                                                    *huginn-about*
+
+Huginn is developed by JDS Consulting, PLLC and released under the MIT
+license. See the LICENSE file in the repository for full terms.
+
+ vim:tw=78:ts=8:ft=help:norl:
