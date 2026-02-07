@@ -22,7 +22,7 @@ Huginn stores issues as Markdown files on your filesystem, links them to source 
 
 ```lua
 {
-    "JDS-Software/huginn",
+    "JDS-Software/huginn_issues",
     opts = {},
 }
 ```
@@ -31,7 +31,7 @@ Huginn stores issues as Markdown files on your filesystem, links them to source 
 
 ```lua
 use {
-    "JDS-Software/huginn",
+    "JDS-Software/huginn_issues",
     config = function()
         require("huginn").setup()
     end,
@@ -41,7 +41,7 @@ use {
 ### vim-plug
 
 ```vim
-Plug 'JDS-Software/huginn'
+Plug 'JDS-Software/huginn_issues'
 ```
 
 ## Getting Started
@@ -50,14 +50,14 @@ Plug 'JDS-Software/huginn'
 
 ```bash
 cd ~/my_project
-neovim
+nvim
 ```
 
 2. Place your cursor on a function or method and press `<leader>hc` or invoke :HuginnCreate to create your first issue.
 
 3. Press `<leader>hs` (:HuginnShow) to see all issues for the current scope of your cursor, or `<leader>hh` to see every file with open issues.
 
-That's it. Issues are stored under the directory configured in `.huginn` (default: `.issues/`), and annotations appear automatically.
+That's it. Issues are stored under the directory configured in `.huginn` (default: `issues/`), and annotations appear automatically.
 
 ## Commands and Keymaps
 
@@ -72,6 +72,7 @@ That's it. Issues are stored under the directory configured in `.huginn` (defaul
 | `:HuginnRemove` | `<leader>hr` | Remove a scope reference from an existing issue |
 | `:HuginnInit` | — | Create a `.huginn` config in the current directory |
 | `:HuginnConfig` | — | Open the `.huginn` config file for editing |
+| `:HuginnDoctor` | — | Check issue integrity and interactively repair problems |
 | `:HuginnLog` | — | Show the log buffer in a floating window |
 
 Commands are registered in [`lua/huginn/init.lua`](lua/huginn/init.lua) and dispatched to individual handlers under [`lua/huginn/commands/`](lua/huginn/commands/).
@@ -103,7 +104,7 @@ require("huginn").setup({
 # foreground = "#000000"
 
 [plugin]
-# issue_dir = .issues
+# issue_dir = issues
 
 [index]
 # key_length = 16
