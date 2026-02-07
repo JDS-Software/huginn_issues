@@ -133,8 +133,6 @@ Each issue is a Markdown file stored at `<issue_dir>/YYYY/MM/<id>/Issue.md`, whe
 
 Issues link to code through tree-sitter scope references like `function_declaration|my_function` rather than fragile line numbers. When you open a buffer, Huginn resolves these references against the current parse tree and places annotations on the right lines. The [location module](lua/huginn/modules/location.lua) handles scope resolution, and the [annotation module](lua/huginn/modules/annotation.lua) renders the virtual text.
 
-Huginn maintains an index to find issues quickly, so you may want to add `<issue_dir>/.index` to your version control's ignore list.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for bug reports and feature requests.
