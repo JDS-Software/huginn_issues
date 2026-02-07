@@ -51,7 +51,12 @@ Plug 'JDS-Software/huginn_issues'
 ```bash
 cd ~/my_project
 nvim
+
+# When in Neovim
+:HuginnInit
 ```
+The configuration will automatically open. You may override any configuration options by removing the comment and setting a new value.
+You may have to restart Neovim for the commands to register.
 
 2. Place your cursor on a function or method and press `<leader>hc` or invoke :HuginnCreate to create your first issue.
 
