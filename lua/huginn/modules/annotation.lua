@@ -36,6 +36,34 @@ local DAGGER = "\xe2\x80\xa0"
 local ns = nil
 local hl_group = "HuginnAnnotation"
 
+--- Per-buffer annotation cache: bufnr -> {tick, fingerprint, open_lines, closed_lines}
+local line_cache = {}
+
+--- Debounce timer for TextChanged re-annotation
+local debounce_timer = nil
+
+--- Cancel and release the debounce timer if active
+local function cancel_debounce()
+    if debounce_timer then
+        debounce_timer:stop()
+        debounce_timer:close()
+        debounce_timer = nil
+    end
+end
+
+--- Compute a fingerprint string from an index entry's issue map
+---@param entry table? index entry with .issues field
+---@return string fingerprint sorted "id=status;..." string
+local function issue_fingerprint(entry)
+    if not entry then return "" end
+    local parts = {}
+    for id, status in pairs(entry.issues) do
+        parts[#parts + 1] = id .. "=" .. status
+    end
+    table.sort(parts)
+    return table.concat(parts, ";")
+end
+
 --- Resolve issue locations and aggregate counts by 0-indexed line
 ---@param ids string[] issue IDs to resolve
 ---@param cwd string project root
@@ -49,7 +77,6 @@ local function resolve_lines(ids, cwd)
         if iss and iss.location and #iss.location.reference > 0 then
             local results = location.resolve(cwd, iss.location)
             if results then
-                local placed = false
                 for _, res in pairs(results) do
                     if res.result == "found" and res.node then
                         local start_row = res.node:range()
@@ -59,13 +86,11 @@ local function resolve_lines(ids, cwd)
                         if not seen_per_line[id][start_row] then
                             seen_per_line[id][start_row] = true
                             line_counts[start_row] = (line_counts[start_row] or 0) + 1
-                            placed = true
                         end
                     end
                 end
-                if not placed then
-                    line_counts[0] = (line_counts[0] or 0) + 1
-                end
+                -- Scoped issues with unresolvable references are intentionally
+                -- omitted: the annotation reappears when the code returns.
             else
                 line_counts[0] = (line_counts[0] or 0) + 1
             end
@@ -123,6 +148,13 @@ function M.annotate(bufnr)
         return
     end
 
+    local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+    local fp = issue_fingerprint(entry)
+    local cached = line_cache[bufnr]
+    if cached and cached.tick == tick and cached.fingerprint == fp then
+        return
+    end
+
     local open_ids = {}
     local closed_ids = {}
 
@@ -143,6 +175,13 @@ function M.annotate(bufnr)
     local open_lines = resolve_lines(open_ids, ctx.cwd)
     local closed_lines = resolve_lines(closed_ids, ctx.cwd)
     place_extmarks(bufnr, open_lines, closed_lines)
+
+    line_cache[bufnr] = {
+        tick = tick,
+        fingerprint = fp,
+        open_lines = open_lines,
+        closed_lines = closed_lines,
+    }
 end
 
 --- Clear all huginn extmarks from a buffer
@@ -151,6 +190,7 @@ function M.clear(bufnr)
     if not ns then return end
     if not vim.api.nvim_buf_is_valid(bufnr) then return end
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    line_cache[bufnr] = nil
 end
 
 --- Register namespace, highlight, autocmds, and config listener
@@ -179,6 +219,24 @@ function M.setup()
         end,
     })
 
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+        group = group,
+        callback = function(args)
+            cancel_debounce()
+            local ctx = context.get()
+            local delay = 300
+            if ctx and ctx.config.annotation and ctx.config.annotation.debounce then
+                delay = ctx.config.annotation.debounce
+            end
+            local bufnr = args.buf
+            debounce_timer = vim.uv.new_timer()
+            debounce_timer:start(delay, 0, vim.schedule_wrap(function()
+                cancel_debounce()
+                M.annotate(bufnr)
+            end))
+        end,
+    })
+
     context.on_config_change(function(new_config)
         local new_bg = "#ffffff"
         local new_fg = "#000000"
@@ -203,6 +261,7 @@ end
 
 --- Reset module state (testing only)
 function M._reset()
+    cancel_debounce()
     if ns then
         for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
             if vim.api.nvim_buf_is_valid(bufnr) then
@@ -211,6 +270,7 @@ function M._reset()
         end
     end
     ns = nil
+    line_cache = {}
     vim.api.nvim_create_augroup("HuginnAnnotation", { clear = true })
 end
 

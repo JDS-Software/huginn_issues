@@ -370,7 +370,7 @@ local function test_function_scoped_resolves_to_line()
     teardown(dir)
 end
 
-local function test_unresolvable_ref_falls_back()
+local function test_unresolvable_ref_omitted()
     local dir = setup_project("")
     local content = "local function foo()\n  return 1\nend"
     local source = create_source_file(dir, "src/main.lua", content)
@@ -396,9 +396,7 @@ local function test_unresolvable_ref_falls_back()
     annotation.annotate(bufnr)
     local marks = get_extmarks(bufnr)
 
-    assert_equal(1, #marks, "should have one extmark (fallback to file-scoped)")
-    assert_equal(0, marks[1][2], "unresolvable ref should fall back to line 0")
-    assert_match("%(1%)", marks[1][4].virt_text[1][1], "should show count (1)")
+    assert_equal(0, #marks, "unresolvable scoped ref should produce no extmark")
 
     vim.api.nvim_buf_delete(bufnr, { force = true })
     teardown(dir)
@@ -511,6 +509,153 @@ local function test_mixed_open_and_closed_different_scopes()
     teardown(dir)
 end
 
+local function test_delete_function_clears_annotation()
+    local dir = setup_project("")
+    local content = table.concat({
+        "local function foo()",
+        "  return 1",
+        "end",
+        "",
+        "local function bar()",
+        "  return 2",
+        "end",
+    }, "\n")
+    local source = create_source_file(dir, "src/main.lua", content)
+    local bufnr = create_buffer(source)
+    vim.api.nvim_set_option_value("filetype", "lua", { buf = bufnr })
+    vim.api.nvim_set_current_buf(bufnr)
+
+    if not has_treesitter_lua() then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+        teardown(dir)
+        return
+    end
+
+    local rel_path = filepath.absolute_to_relative(source, dir)
+
+    -- Get reference for foo (line 1)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    local cmd_ctx = context.from_command({ range = 0 })
+    local loc = location.from_context(cmd_ctx)
+    assert_true(#loc.reference > 0, "cursor inside foo should produce a reference")
+    local foo_ref = loc.reference[1]
+
+    -- Create a function-scoped issue on foo
+    local iss = issue.create({ filepath = rel_path, reference = { foo_ref } }, "Issue on foo")
+    assert_not_nil(iss)
+
+    -- Annotate: should show extmark on foo's line
+    annotation.annotate(bufnr)
+    local marks = get_extmarks(bufnr)
+    assert_equal(1, #marks, "should have one extmark on foo")
+    assert_equal(0, marks[1][2], "foo extmark should be at line 0")
+
+    -- Delete foo (lines 0-2) — simulates visual-mode delete
+    vim.api.nvim_buf_set_lines(bufnr, 0, 3, false, {})
+
+    -- Re-annotate: foo is gone, annotation should disappear
+    annotation.annotate(bufnr)
+    marks = get_extmarks(bufnr)
+    assert_equal(0, #marks, "annotation should disappear when function is deleted")
+
+    -- Re-insert foo at the top — simulates paste
+    vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, {
+        "local function foo()",
+        "  return 1",
+        "end",
+    })
+
+    -- Re-annotate: foo is back, annotation should reappear
+    annotation.annotate(bufnr)
+    marks = get_extmarks(bufnr)
+    assert_equal(1, #marks, "annotation should reappear when function is pasted back")
+    assert_equal(0, marks[1][2], "foo extmark should be at line 0 after re-insert")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
+local function test_cache_hit_skips_reannotation()
+    local dir = setup_project("")
+    local source = create_source_file(dir, "src/main.lua", "print('hello')")
+    local bufnr = create_buffer(source)
+
+    create_file_scoped_issue(source, "20260110_120000", "test issue")
+
+    annotation.annotate(bufnr)
+    local marks1 = get_extmarks(bufnr)
+    assert_equal(1, #marks1, "first annotate should place one extmark")
+
+    -- Manually wipe extmarks without evicting cache
+    local ns_id = annotation._get_ns()
+    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+    local cleared = get_extmarks(bufnr)
+    assert_equal(0, #cleared, "extmarks should be gone after manual clear")
+
+    -- Second annotate with no changes should be a cache hit (returns early)
+    annotation.annotate(bufnr)
+    local marks2 = get_extmarks(bufnr)
+    assert_equal(0, #marks2, "cache hit should skip re-annotation, extmarks stay cleared")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
+local function test_cache_invalidation_on_content_change()
+    local dir = setup_project("")
+    local source = create_source_file(dir, "src/main.lua", "print('hello')")
+    local bufnr = create_buffer(source)
+
+    create_file_scoped_issue(source, "20260110_120000", "test issue")
+
+    annotation.annotate(bufnr)
+    local marks1 = get_extmarks(bufnr)
+    assert_equal(1, #marks1, "first annotate should place one extmark")
+
+    -- Modify buffer content (bumps changedtick)
+    vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, { "-- new comment" })
+
+    -- Manually wipe extmarks without evicting cache
+    local ns_id = annotation._get_ns()
+    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+    local cleared = get_extmarks(bufnr)
+    assert_equal(0, #cleared, "extmarks should be gone after manual clear")
+
+    -- annotate should detect stale changedtick and re-place extmarks
+    annotation.annotate(bufnr)
+    local marks2 = get_extmarks(bufnr)
+    assert_equal(1, #marks2, "cache miss should re-create extmarks after content change")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
+local function test_cache_invalidation_on_issue_change()
+    local dir = setup_project("")
+    local source = create_source_file(dir, "src/main.lua", "print('hello')")
+    local bufnr = create_buffer(source)
+
+    create_file_scoped_issue(source, "20260110_120000", "first issue")
+
+    annotation.annotate(bufnr)
+    local marks1 = get_extmarks(bufnr)
+    assert_equal(1, #marks1, "first annotate should place one extmark")
+    local text1 = marks1[1][4].virt_text[1][1]
+    assert_match("%(1%)", text1, "should show count (1)")
+
+    -- Add a second issue (changes the fingerprint)
+    create_file_scoped_issue(source, "20260110_120001", "second issue")
+
+    annotation.annotate(bufnr)
+    local marks2 = get_extmarks(bufnr)
+    assert_equal(1, #marks2, "should have one extmark (both file-scoped)")
+    local text2 = marks2[1][4].virt_text[1][1]
+    assert_match("%(2%)", text2, "should show count (2) after new issue added")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
 local function test_refresh()
     local dir = setup_project("")
     local source = create_source_file(dir, "src/main.lua", "print('hello')")
@@ -541,9 +686,13 @@ function M.run()
     runner:test("annotate: no error on scratch buffer", test_scratch_buffer)
     runner:test("annotate: disabled via config suppresses extmarks", test_disabled_via_config)
     runner:test("annotate: function-scoped issues resolve to correct lines", test_function_scoped_resolves_to_line)
-    runner:test("annotate: unresolvable reference falls back to line 0", test_unresolvable_ref_falls_back)
+    runner:test("annotate: unresolvable scoped reference produces no extmark", test_unresolvable_ref_omitted)
     runner:test("annotate: function-scoped closed issue resolves to correct line", test_function_scoped_closed_resolves_to_line)
     runner:test("annotate: mixed open and closed at different scopes", test_mixed_open_and_closed_different_scopes)
+    runner:test("annotate: deleting function removes annotation, reinserting restores it", test_delete_function_clears_annotation)
+    runner:test("cache: repeated annotate is no-op when unchanged", test_cache_hit_skips_reannotation)
+    runner:test("cache: invalidates on buffer content change", test_cache_invalidation_on_content_change)
+    runner:test("cache: invalidates on issue set change", test_cache_invalidation_on_issue_change)
     runner:test("refresh: annotates current buffer", test_refresh)
 
     runner:run()

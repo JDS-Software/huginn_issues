@@ -82,6 +82,7 @@ local sections = {
             { name = "enabled",    default = true,      validate = is_boolean },
             { name = "background", default = "#ffffff", validate = is_string, opts = { pattern = "^#%x%x%x%x%x%x$" } },
             { name = "foreground", default = "#000000", validate = is_string, opts = { pattern = "^#%x%x%x%x%x%x$" } },
+            { name = "debounce",   default = 300,       validate = is_integer, opts = { min = 0, max = 5000 } },
         },
     },
     plugin = {
