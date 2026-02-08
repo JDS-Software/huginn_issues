@@ -404,6 +404,113 @@ local function test_unresolvable_ref_falls_back()
     teardown(dir)
 end
 
+local function test_function_scoped_closed_resolves_to_line()
+    local dir = setup_project("")
+    local content = table.concat({
+        "local function foo()",
+        "  return 1",
+        "end",
+        "",
+        "local function bar()",
+        "  return 2",
+        "end",
+    }, "\n")
+    local source = create_source_file(dir, "src/main.lua", content)
+    local bufnr = create_buffer(source)
+    vim.api.nvim_set_option_value("filetype", "lua", { buf = bufnr })
+    vim.api.nvim_set_current_buf(bufnr)
+
+    if not has_treesitter_lua() then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+        teardown(dir)
+        return
+    end
+
+    local rel_path = filepath.absolute_to_relative(source, dir)
+
+    -- Get the reference for bar (line 5)
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    local cmd_ctx = context.from_command({ range = 0 })
+    local loc = location.from_context(cmd_ctx)
+    assert_true(#loc.reference > 0, "cursor inside bar should produce a reference")
+    local bar_ref = loc.reference[1]
+
+    -- Create and close a function-scoped issue on bar
+    local iss = issue.create({ filepath = rel_path, reference = { bar_ref } }, "Closed on bar")
+    assert_not_nil(iss)
+    issue.resolve(iss.id)
+    issue_index.flush()
+
+    annotation.annotate(bufnr)
+    local marks = get_extmarks(bufnr)
+
+    assert_equal(1, #marks, "should have one extmark for closed issue")
+    assert_equal(4, marks[1][2], "dagger should be on bar's line (4), not line 0")
+    assert_match(DAGGER, marks[1][4].virt_text[1][1], "should show dagger marker")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
+local function test_mixed_open_and_closed_different_scopes()
+    local dir = setup_project("")
+    local content = table.concat({
+        "local function foo()",
+        "  return 1",
+        "end",
+        "",
+        "local function bar()",
+        "  return 2",
+        "end",
+    }, "\n")
+    local source = create_source_file(dir, "src/main.lua", content)
+    local bufnr = create_buffer(source)
+    vim.api.nvim_set_option_value("filetype", "lua", { buf = bufnr })
+    vim.api.nvim_set_current_buf(bufnr)
+
+    if not has_treesitter_lua() then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+        teardown(dir)
+        return
+    end
+
+    local rel_path = filepath.absolute_to_relative(source, dir)
+
+    -- Get references for foo and bar
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    local cmd_ctx = context.from_command({ range = 0 })
+    local loc = location.from_context(cmd_ctx)
+    local foo_ref = loc.reference[1]
+
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    cmd_ctx = context.from_command({ range = 0 })
+    loc = location.from_context(cmd_ctx)
+    local bar_ref = loc.reference[1]
+
+    -- Open issue on foo
+    local iss_foo = issue.create({ filepath = rel_path, reference = { foo_ref } }, "Open on foo")
+    assert_not_nil(iss_foo)
+
+    -- Closed issue on bar
+    local iss_bar = issue.create({ filepath = rel_path, reference = { bar_ref } }, "Closed on bar")
+    assert_not_nil(iss_bar)
+    issue.resolve(iss_bar.id)
+    issue_index.flush()
+
+    annotation.annotate(bufnr)
+    local marks = get_extmarks(bufnr)
+
+    assert_equal(2, #marks, "should have two extmarks: open on foo, dagger on bar")
+    table.sort(marks, function(a, b) return a[2] < b[2] end)
+    assert_equal(0, marks[1][2], "foo extmark should be at line 0")
+    assert_match("%(1%)", marks[1][4].virt_text[1][1], "foo should show open count (1)")
+    assert_equal(4, marks[2][2], "bar extmark should be at line 4")
+    assert_match(DAGGER, marks[2][4].virt_text[1][1], "bar should show dagger")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    teardown(dir)
+end
+
 local function test_refresh()
     local dir = setup_project("")
     local source = create_source_file(dir, "src/main.lua", "print('hello')")
@@ -435,6 +542,8 @@ function M.run()
     runner:test("annotate: disabled via config suppresses extmarks", test_disabled_via_config)
     runner:test("annotate: function-scoped issues resolve to correct lines", test_function_scoped_resolves_to_line)
     runner:test("annotate: unresolvable reference falls back to line 0", test_unresolvable_ref_falls_back)
+    runner:test("annotate: function-scoped closed issue resolves to correct line", test_function_scoped_closed_resolves_to_line)
+    runner:test("annotate: mixed open and closed at different scopes", test_mixed_open_and_closed_different_scopes)
     runner:test("refresh: annotates current buffer", test_refresh)
 
     runner:run()

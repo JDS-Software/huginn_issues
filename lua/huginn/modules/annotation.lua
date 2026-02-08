@@ -36,6 +36,69 @@ local DAGGER = "\xe2\x80\xa0"
 local ns = nil
 local hl_group = "HuginnAnnotation"
 
+--- Resolve issue locations and aggregate counts by 0-indexed line
+---@param ids string[] issue IDs to resolve
+---@param cwd string project root
+---@return table<integer, integer> line -> count of issues on that line
+local function resolve_lines(ids, cwd)
+    local line_counts = {}
+    local seen_per_line = {}
+
+    for _, id in ipairs(ids) do
+        local iss = issue.read(id)
+        if iss and iss.location and #iss.location.reference > 0 then
+            local results = location.resolve(cwd, iss.location)
+            if results then
+                local placed = false
+                for _, res in pairs(results) do
+                    if res.result == "found" and res.node then
+                        local start_row = res.node:range()
+                        if not seen_per_line[id] then
+                            seen_per_line[id] = {}
+                        end
+                        if not seen_per_line[id][start_row] then
+                            seen_per_line[id][start_row] = true
+                            line_counts[start_row] = (line_counts[start_row] or 0) + 1
+                            placed = true
+                        end
+                    end
+                end
+                if not placed then
+                    line_counts[0] = (line_counts[0] or 0) + 1
+                end
+            else
+                line_counts[0] = (line_counts[0] or 0) + 1
+            end
+        else
+            line_counts[0] = (line_counts[0] or 0) + 1
+        end
+    end
+
+    return line_counts
+end
+
+--- Place extmarks on a buffer for resolved line counts
+---@param bufnr integer buffer number
+---@param open_lines table<integer, integer> line -> open issue count
+---@param closed_lines table<integer, integer> line -> closed issue count
+local function place_extmarks(bufnr, open_lines, closed_lines)
+    for line, count in pairs(open_lines) do
+        vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
+            virt_text = { { ICON .. "(" .. count .. ")", hl_group } },
+            virt_text_pos = "eol",
+        })
+    end
+
+    for line, _ in pairs(closed_lines) do
+        if not open_lines[line] then
+            vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
+                virt_text = { { ICON .. "[" .. DAGGER .. "]", hl_group } },
+                virt_text_pos = "eol",
+            })
+        end
+    end
+end
+
 --- Compute and display annotations for a buffer
 ---@param bufnr integer buffer number
 function M.annotate(bufnr)
@@ -61,72 +124,25 @@ function M.annotate(bufnr)
     end
 
     local open_ids = {}
-    local has_closed = false
+    local closed_ids = {}
 
     for id, status in pairs(entry.issues) do
         if status == "open" then
             table.insert(open_ids, id)
         elseif status == "closed" then
-            has_closed = true
+            table.insert(closed_ids, id)
         end
     end
 
     M.clear(bufnr)
 
-    if #open_ids == 0 and not has_closed then
+    if #open_ids == 0 and #closed_ids == 0 then
         return
     end
 
-    if #open_ids == 0 and has_closed then
-        vim.api.nvim_buf_set_extmark(bufnr, ns, 0, 0, {
-            virt_text = { { ICON .. "[" .. DAGGER .. "]", hl_group } },
-            virt_text_pos = "eol",
-        })
-        return
-    end
-
-    -- Aggregate open issue counts by 0-indexed line
-    local line_counts = {}
-    local seen_per_line = {}
-
-    for _, id in ipairs(open_ids) do
-        local iss = issue.read(id)
-        if iss and iss.location and #iss.location.reference > 0 then
-            local results = location.resolve(ctx.cwd, iss.location)
-            if results then
-                local placed = false
-                for _, res in pairs(results) do
-                    if res.result == "found" and res.node then
-                        local start_row = res.node:range()
-                        if not seen_per_line[id] then
-                            seen_per_line[id] = {}
-                        end
-                        if not seen_per_line[id][start_row] then
-                            seen_per_line[id][start_row] = true
-                            line_counts[start_row] = (line_counts[start_row] or 0) + 1
-                            placed = true
-                        end
-                    end
-                end
-                if not placed then
-                    -- Unresolvable reference: fall back to file-scoped
-                    line_counts[0] = (line_counts[0] or 0) + 1
-                end
-            else
-                line_counts[0] = (line_counts[0] or 0) + 1
-            end
-        else
-            -- No location or no references: file-scoped
-            line_counts[0] = (line_counts[0] or 0) + 1
-        end
-    end
-
-    for line, count in pairs(line_counts) do
-        vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
-            virt_text = { { ICON .. "(" .. count .. ")", hl_group } },
-            virt_text_pos = "eol",
-        })
-    end
+    local open_lines = resolve_lines(open_ids, ctx.cwd)
+    local closed_lines = resolve_lines(closed_ids, ctx.cwd)
+    place_extmarks(bufnr, open_lines, closed_lines)
 end
 
 --- Clear all huginn extmarks from a buffer
