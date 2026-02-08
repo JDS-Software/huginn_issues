@@ -476,6 +476,25 @@ function M.all_entries()
     return result
 end
 
+--- Check if any existing index file has a name length that differs from target
+---@param target_key_length number desired key length
+---@return boolean
+local function needs_migration(target_key_length)
+    local ctx = context.get()
+    if not ctx then return false end
+
+    local index_dir = ctx_index_dir(ctx)
+    if not filepath.exists(index_dir) then return false end
+
+    local dominated = false
+    walk_index_dir(index_dir, function(file_name, _)
+        if #file_name ~= target_key_length then
+            dominated = true
+        end
+    end)
+    return dominated
+end
+
 --- Register autocmds for lazy flushing and config-change listener
 function M.setup()
     local group = vim.api.nvim_create_augroup("HuginnIndex", { clear = true })
@@ -496,25 +515,6 @@ function M.setup()
             M.migrate_key_length(new_kl)
         end
     end)
-end
-
---- Check if any existing index file has a name length that differs from target
----@param target_key_length number desired key length
----@return boolean
-local function needs_migration(target_key_length)
-    local ctx = context.get()
-    if not ctx then return false end
-
-    local index_dir = ctx_index_dir(ctx)
-    if not filepath.exists(index_dir) then return false end
-
-    local dominated = false
-    walk_index_dir(index_dir, function(file_name, _)
-        if #file_name ~= target_key_length then
-            dominated = true
-        end
-    end)
-    return dominated
 end
 
 --- Build migration plan by scanning existing index files
