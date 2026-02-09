@@ -146,34 +146,8 @@ local function register_commands()
     })
 end
 
---- Setup function
----@param opts table? plugin options
-function M.setup(opts)
-    if vim.g.loaded_huginn then
-        return
-    end
-    vim.g.loaded_huginn = true
-
-    opts = opts or {}
-
-    -- Merge keymap overrides: user values replace defaults, false disables
-    local keymaps = vim.tbl_extend("force", default_keymaps, opts.keymaps or {})
-
-    logger = logging.new(false, ".huginnlog")
-
-    register_commands()
-
-    local ctx, err = context.init(nil, logger)
-
-    if not ctx then
-        logger:log("INFO", "Huginn dormant: " .. (err or "unknown error"))
-        return
-    end
-
-    context.setup(logger)
-    issue_index.setup()
-    annotation.setup()
-
+--- register all user keymaps
+local function register_keymap(keymaps)
     -- Register keymaps (only when plugin is active)
     if keymaps.create then
         vim.keymap.set({ "n", "v" }, keymaps.create, ":HuginnCreate<CR>",
@@ -209,8 +183,37 @@ function M.setup(opts)
         vim.keymap.set("n", keymaps.home, ":HuginnHome<CR>",
             { silent = true, desc = "Show all project files with issues" })
     end
+end
 
+--- Setup function
+---@param opts table? plugin options
+function M.setup(opts)
+    if vim.g.loaded_huginn then
+        return
+    end
+
+    opts = opts or {}
+
+    logger = logging.new(false, ".huginnlog")
+
+    context.setup(logger)
+    issue_index.setup()
+    annotation.setup()
+
+    register_commands()
+    -- Merge keymap overrides: user values replace defaults, false disables
+    local keymaps = vim.tbl_extend("force", default_keymaps, opts.keymaps or {})
+    register_keymap(keymaps)
+
+    local ctx, err = context.init(nil, logger)
+
+    if not ctx then
+        logger:log("INFO", "Huginn dormant: " .. (err or "unknown error"))
+        return
+    end
     logger:log("INFO", "Huginn initialized: " .. ctx.cwd)
+
+    vim.g.loaded_huginn = true
 end
 
 return M
