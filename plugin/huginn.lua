@@ -24,7 +24,6 @@
 if vim.g.loaded_huginn then
     return
 end
-vim.g.loaded_huginn = true
 
--- Initialize plugin
+-- Initialize plugin with defaults (skipped if user already called setup())
 require("huginn").setup()

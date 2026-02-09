@@ -50,6 +50,7 @@ local function reset()
     context._reset()
     config.active = {}
     config.huginn_path = nil
+    vim.g.loaded_huginn = nil
     vim.api.nvim_create_augroup("HuginnConfig", { clear = true })
     vim.api.nvim_create_augroup("HuginnLogging", { clear = true })
 end

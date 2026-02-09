@@ -149,6 +149,11 @@ end
 --- Setup function
 ---@param opts table? plugin options
 function M.setup(opts)
+    if vim.g.loaded_huginn then
+        return
+    end
+    vim.g.loaded_huginn = true
+
     opts = opts or {}
 
     -- Merge keymap overrides: user values replace defaults, false disables
