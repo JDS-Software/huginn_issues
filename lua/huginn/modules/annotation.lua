@@ -253,9 +253,10 @@ function M.setup()
     end)
 end
 
---- Re-annotate the current buffer
+--- Re-annotate the current buffer (bypasses cache)
 function M.refresh()
     local bufnr = vim.api.nvim_get_current_buf()
+    line_cache[bufnr] = nil
     M.annotate(bufnr)
 end
 
