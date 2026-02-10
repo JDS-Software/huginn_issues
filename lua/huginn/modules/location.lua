@@ -173,6 +173,16 @@ local function find_innermost_scope(node, line, source)
     return nil
 end
 
+--- Walk a tree-sitter tree depth-first, calling fn on every node
+---@param node userdata TSNode root
+---@param fn fun(n: userdata)
+local function walk_tree(node, fn)
+    fn(node)
+    for child in node:iter_children() do
+        walk_tree(child, fn)
+    end
+end
+
 --- Collect all nodes matching a given type and symbol name
 ---@param node userdata TSNode root
 ---@param ntype string tree-sitter node type (exact match)
@@ -181,15 +191,11 @@ end
 ---@return userdata[] matches array of matching TSNodes
 local function find_nodes_by_type_and_symbol(node, ntype, symbol, source)
     local matches = {}
-    local function walk(n)
+    walk_tree(node, function(n)
         if n:type() == ntype and get_symbol(n, source) == symbol then
             table.insert(matches, n)
         end
-        for child in n:iter_children() do
-            walk(child)
-        end
-    end
-    walk(node)
+    end)
     return matches
 end
 
@@ -268,15 +274,11 @@ end
 ---@return userdata[] scopes array of TSNodes
 local function collect_all_scopes(node, source)
     local scopes = {}
-    local function walk(n)
+    walk_tree(node, function(n)
         if is_named_scope(n) and get_symbol(n, source) then
             table.insert(scopes, n)
         end
-        for child in n:iter_children() do
-            walk(child)
-        end
-    end
-    walk(node)
+    end)
     return scopes
 end
 
@@ -347,21 +349,10 @@ function M.from_context(cmd_ctx)
         return nil, "no window state available"
     end
 
-    local ft = vim.bo[cmd_ctx.buffer].filetype
-    local ok, parser = pcall(vim.treesitter.get_parser, cmd_ctx.buffer)
-    if not ok or not parser then
-        return nil, "no tree-sitter parser available for " .. ft
-    end
-
     local rel_path = filepath.absolute_to_relative(cmd_ctx.window.filepath, cmd_ctx.cwd)
 
-    local ok_parse, _ = pcall(parser.parse, parser)
-    if not ok_parse then return nil, "tree-sitter parse failed" end
-    local trees = parser:trees()
-    if not trees or #trees == 0 then
-        return nil, "tree-sitter parse returned no trees"
-    end
-    local root = trees[1]:root()
+    local root, _, err = tree_from_buffer(cmd_ctx.buffer)
+    if not root then return nil, err end
 
     local mode = cmd_ctx.window.mode
     if mode == "n" then
@@ -404,46 +395,8 @@ function M.resolve(cwd, location)
 
     local abs_path = filepath.join(cwd, location.filepath)
 
-    local source
-    local root
-    local bufnr = vim.fn.bufnr(abs_path)
-
-    if bufnr ~= -1 then
-        local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-        if not ok or not parser then
-            return nil, "no tree-sitter parser available"
-        end
-        local ok_parse, _ = pcall(parser.parse, parser)
-        if not ok_parse then return nil, "tree-sitter parse failed" end
-        local trees = parser:trees()
-        if not trees or #trees == 0 then
-            return nil, "tree-sitter parse returned no trees"
-        end
-        root = trees[1]:root()
-        source = bufnr
-    else
-        local ok_read, lines = pcall(vim.fn.readfile, abs_path)
-        if not ok_read then
-            return nil, "file not found: " .. location.filepath
-        end
-        local content = table.concat(lines, "\n")
-        local lang = vim.filetype.match({ filename = abs_path })
-        if not lang then
-            return nil, "no tree-sitter parser available"
-        end
-        local ok, parser = pcall(vim.treesitter.get_string_parser, content, lang)
-        if not ok or not parser then
-            return nil, "no tree-sitter parser available"
-        end
-        local ok_parse, _ = pcall(parser.parse, parser)
-        if not ok_parse then return nil, "tree-sitter parse failed" end
-        local trees = parser:trees()
-        if not trees or #trees == 0 then
-            return nil, "tree-sitter parse returned no trees"
-        end
-        root = trees[1]:root()
-        source = content
-    end
+    local root, source, err = acquire_tree(abs_path, location.filepath)
+    if not root then return nil, err end
 
     local results = {}
     for _, ref in ipairs(location.reference) do
